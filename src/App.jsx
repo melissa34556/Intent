@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlarmClock, ArrowRight, Check, Clock3, Pause, Play, RotateCcw, Timer, X } from 'lucide-react';
+import { Capacitor, registerPlugin } from '@capacitor/core';
+import { AlarmClock, ArrowRight, Check, Clock3, Pause, Play, Plus, Timer, X } from 'lucide-react';
 
 const PRESETS = [10, 20, 30];
+const InstalledApps = registerPlugin('InstalledApps');
 
 function formatTime(seconds) {
   const safe = Math.max(0, seconds);
@@ -34,6 +36,14 @@ export default function App() {
   const [sessions, setSessions] = useState(readSessions);
   const [startedAt, setStartedAt] = useState(null);
   const [warned, setWarned] = useState([]);
+  const [apps, setApps] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('intent-apps') || '[]'); }
+    catch { return []; }
+  });
+  const [availableApps, setAvailableApps] = useState([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [loadingApps, setLoadingApps] = useState(false);
+  const [appError, setAppError] = useState('');
 
   useEffect(() => {
     if (!running || paused) return;
@@ -57,6 +67,54 @@ export default function App() {
     const id = window.setInterval(tick, 500);
     return () => window.clearInterval(id);
   }, [running, paused, targetTime, warned]);
+
+  async function openAppPicker() {
+    setPickerOpen(true);
+    setAppError('');
+    if (!Capacitor.isNativePlatform()) {
+      setAvailableApps([]);
+      return;
+    }
+    setLoadingApps(true);
+    try {
+      const result = await InstalledApps.getInstalledApps();
+      setAvailableApps(result.apps || []);
+    } catch (error) {
+      setAppError('De apps op je telefoon konden niet worden opgehaald. Probeer het opnieuw.');
+    } finally {
+      setLoadingApps(false);
+    }
+  }
+
+  function addApp(app) {
+    setApps((current) => {
+      if (current.some((item) => item.packageName === app.packageName)) return current;
+      const updated = [...current, app];
+      localStorage.setItem('intent-apps', JSON.stringify(updated));
+      return updated;
+    });
+    setPickerOpen(false);
+  }
+
+  function removeApp(packageName) {
+    setApps((current) => {
+      const updated = current.filter((item) => item.packageName !== packageName);
+      localStorage.setItem('intent-apps', JSON.stringify(updated));
+      return updated;
+    });
+  }
+
+  async function launchApp(app) {
+    if (!Capacitor.isNativePlatform()) {
+      setNotice('Apps openen kan vanuit de geïnstalleerde Android-app van Intent.');
+      return;
+    }
+    try {
+      await InstalledApps.launchApp({ packageName: app.packageName });
+    } catch (error) {
+      setNotice('Deze app kon niet worden geopend.');
+    }
+  }
 
   function finishSession() {
     if (!startedAt) return;
@@ -141,10 +199,70 @@ export default function App() {
         </div>
       </header>
 
-      <section className="welcome">
-        <p className="eyebrow">EVEN VOOR JEZELF</p>
-        <h1>Waar wil je<br /><em>tijd voor maken?</em></h1>
-        <p className="intro">Kies een moment voor jezelf. Intent helpt je om je eindtijd in beeld te houden.</p>
+      <section className="apps-section">
+        <div className="apps-heading">
+          <div>
+            <p className="eyebrow">JOUW PLEK</p>
+            <h1>Mijn apps</h1>
+          </div>
+        </div>
+        <div className="app-grid">
+          {Array.from({ length: Math.max(6, apps.length + 1) }, (_, index) => {
+            const app = apps[index];
+            if (app) {
+              return (
+                <div className="app-slot" key={app.packageName}>
+                  <button className="app-tile" onClick={() => launchApp(app)} aria-label={app.name + ' openen'}>
+                    <span className="app-icon-frame"><img src={app.icon} alt="" /></span>
+                    <span className="app-label">{app.name}</span>
+                  </button>
+                  <button className="remove-app" onClick={() => removeApp(app.packageName)} aria-label={app.name + ' verwijderen'}><X size={12} /></button>
+                </div>
+              );
+            }
+            return (
+              <button
+                className={index === apps.length ? 'app-tile empty-app-tile add-app-tile' : 'app-tile empty-app-tile'}
+                key={'empty-' + index}
+                onClick={index === apps.length ? openAppPicker : undefined}
+                disabled={index !== apps.length}
+                aria-label={index === apps.length ? 'App toevoegen' : 'Leeg app-vak'}
+              >
+                <span className="empty-app-icon">{index === apps.length ? <Plus size={21} strokeWidth={1.7} /> : null}</span>
+                <span className="app-label empty-label">{index === apps.length ? 'Toevoegen' : ' '}</span>
+              </button>
+            );
+          })}
+        </div>
+        {pickerOpen && (
+          <div className="app-picker-backdrop" onClick={() => setPickerOpen(false)}>
+            <section className="app-picker" role="dialog" aria-modal="true" aria-label="App kiezen" onClick={(event) => event.stopPropagation()}>
+              <div className="picker-heading">
+                <div><h2>App toevoegen</h2><p>Kies een app die op je telefoon staat.</p></div>
+                <button className="picker-close" onClick={() => setPickerOpen(false)} aria-label="Sluiten"><X size={19} /></button>
+              </div>
+              {!Capacitor.isNativePlatform() ? (
+                <p className="picker-message">Het kiezen van geïnstalleerde apps is beschikbaar in de Android-app van Intent. Open Intent op je telefoon om apps toe te voegen.</p>
+              ) : loadingApps ? (
+                <p className="picker-message">Geïnstalleerde apps ophalen…</p>
+              ) : appError ? (
+                <p className="picker-message">{appError}</p>
+              ) : availableApps.filter((item) => !apps.some((selected) => selected.packageName === item.packageName)).length ? (
+                <div className="available-app-list">
+                  {availableApps.filter((item) => !apps.some((selected) => selected.packageName === item.packageName)).map((app) => (
+                    <button className="available-app" key={app.packageName} onClick={() => addApp(app)}>
+                      <img src={app.icon} alt="" />
+                      <span>{app.name}</span>
+                      <Plus size={17} />
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="picker-message">Alle gevonden apps zijn al toegevoegd.</p>
+              )}
+            </section>
+          </div>
+        )}
       </section>
 
       <section className="timer-card">
