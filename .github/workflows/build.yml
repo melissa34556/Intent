@@ -57,6 +57,8 @@ jobs:
         run: npm run build
       - name: Generate Android project
         run: npx cap add android
+      - name: Install native app picker
+        run: bash scripts/install-android-native.sh
       - name: Sync Capacitor
         run: npx cap sync android
       - name: Build debug APK
