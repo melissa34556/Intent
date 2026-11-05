@@ -46,6 +46,16 @@ export default function App() {
   const [appError, setAppError] = useState('');
 
   useEffect(() => {
+    const splash = document.getElementById('app-splash');
+    if (!splash) return undefined;
+    const timer = window.setTimeout(() => {
+      splash.classList.add('is-hidden');
+      window.setTimeout(() => splash.remove(), 450);
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
     if (!running || paused) return;
     const tick = () => {
       const next = Math.max(0, Math.ceil((targetTime - Date.now()) / 1000));
