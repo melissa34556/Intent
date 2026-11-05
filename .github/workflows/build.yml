@@ -57,6 +57,10 @@ jobs:
         run: npm run build
       - name: Generate Android project
         run: npx cap add android
+      - name: Generate launcher icons from the app artwork
+        run: |
+          npm install --no-save @capacitor/assets
+          npx capacitor-assets generate --android
       - name: Install native app picker
         run: bash scripts/install-android-native.sh
       - name: Sync Capacitor
